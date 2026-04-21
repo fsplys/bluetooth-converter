@@ -274,17 +274,22 @@ function setupEventListeners(): void {
       return;
     }
 
-    parsedDevices = parseRegistry(input);
+    try {
+      parsedDevices = parseRegistry(input);
 
-    if (parsedDevices.length === 0) {
-      showToast('未能解析到蓝牙设备信息');
-      return;
+      if (parsedDevices.length === 0) {
+        showToast('未能解析到蓝牙设备信息');
+        return;
+      }
+
+      selectedDeviceIndex = 0;
+      updateDeviceSelector();
+      updateOutput();
+      showToast(`成功解析 ${parsedDevices.length} 个设备`);
+    } catch (error) {
+      showToast(`解析错误: ${(error as Error).message}`);
+      console.error('解析错误:', error);
     }
-
-    selectedDeviceIndex = 0;
-    updateDeviceSelector();
-    updateOutput();
-    showToast(`成功解析 ${parsedDevices.length} 个设备`);
   });
 
   // 清空
@@ -307,9 +312,48 @@ function setupEventListeners(): void {
     updateOutput();
   });
 
+  // 防抖函数
+  function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
+    let timeout: NodeJS.Timeout | null = null;
+    return (...args: Parameters<T>) => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  }
+
+  // 实时预览功能
+  const debouncedParse = debounce(() => {
+    const input = registryInput.value.trim();
+    const deviceName = deviceNameInput.value.trim();
+    
+    if (!input || !deviceName) {
+      return;
+    }
+
+    try {
+      parsedDevices = parseRegistry(input);
+      
+      if (parsedDevices.length > 0) {
+        selectedDeviceIndex = 0;
+        updateDeviceSelector();
+        updateOutput();
+      }
+    } catch (error) {
+      // 实时预览时不显示错误，避免干扰用户输入
+      console.debug('实时预览解析错误:', error);
+    }
+  }, 500);
+
+  // 注册表输入变化时触发实时预览
+  registryInput.addEventListener('input', debouncedParse);
+  
   // 设备名称变化时更新输出
   deviceNameInput.addEventListener('input', () => {
-    updateOutput();
+    if (parsedDevices.length > 0) {
+      updateOutput();
+    } else {
+      debouncedParse();
+    }
   });
 
   // 复制
