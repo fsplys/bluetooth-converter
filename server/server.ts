@@ -13,6 +13,14 @@ const app = express();
 // 使用 http.createServer 包装 Express app，以便支持 WebSocket 等协议升级
 const server = createServer(app);
 
+/** 带有 HTTP 状态码的错误类型 */
+type HttpError = Error & { status?: number };
+
+/** 类型守卫：判断错误对象是否携带 status 字段 */
+function hasHttpStatus(err: Error): err is HttpError {
+  return 'status' in err;
+}
+
 async function startServer(): Promise<Server> {
   // 请求日志（仅开发环境）
   if (isDev) {
@@ -39,8 +47,7 @@ async function startServer(): Promise<Server> {
   // 全局错误处理
   app.use((err: Error, req: express.Request, res: express.Response) => {
     console.error('Server error:', err);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const status = 'status' in err ? (err as any).status || 500 : 500;
+    const status = hasHttpStatus(err) ? err.status ?? 500 : 500;
     res.status(status).json({
       error: err.message || 'Internal server error',
     });

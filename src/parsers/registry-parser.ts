@@ -78,6 +78,43 @@ export function formatMacAddress(hexStr: string): string {
 }
 
 /**
+ * 从单个设备详细信息块内容中解析各字段
+ * @param blockContent 设备子键对应的注册表内容片段
+ */
+function parseDeviceDetails(blockContent: string): Partial<ParsedDevice> {
+  const details: Partial<ParsedDevice> = {};
+
+  const addressMatch = blockContent.match(REGEX.address);
+  if (addressMatch) details.address = parseBluetoothAddress(addressMatch[1]);
+
+  const ltkMatch = blockContent.match(REGEX.ltk);
+  if (ltkMatch) details.ltk = parseHexBytesRaw(ltkMatch[1]);
+
+  const irkMatch = blockContent.match(REGEX.irk);
+  if (irkMatch) details.irk = parseHexBytesRaw(irkMatch[1]);
+
+  const csrkMatch = blockContent.match(REGEX.csrk);
+  if (csrkMatch) details.csrk = parseHexBytesRaw(csrkMatch[1]);
+
+  const edivMatch = blockContent.match(REGEX.ediv);
+  if (edivMatch) details.ediv = parseInt(edivMatch[1], 16);
+
+  const erandMatch = blockContent.match(REGEX.erand);
+  if (erandMatch) details.erand = parseHexToBigIntDecimal(erandMatch[1], true).toString();
+
+  const addrTypeMatch = blockContent.match(REGEX.addressType);
+  if (addrTypeMatch) details.addressType = parseInt(addrTypeMatch[1], 16);
+
+  const authReqMatch = blockContent.match(REGEX.authReq);
+  if (authReqMatch) details.authReq = parseInt(authReqMatch[1], 16);
+
+  const keyLenMatch = blockContent.match(REGEX.keyLength);
+  if (keyLenMatch) details.keyLength = parseInt(keyLenMatch[1], 16);
+
+  return details;
+}
+
+/**
  * 解析 Windows 注册表文本格式
  * 
  * 处理流程：
@@ -134,15 +171,16 @@ export function parseRegistry(registryText: string): ParsedDevice[] {
     throw new Error('未能找到适配器级别信息，请确保注册表包含完整的 Keys 项');
   }
 
-  // 第二步：从设备详细信息块提取共享数据
-  let sharedDetails: Partial<ParsedDevice> = {};
+  // 第二步：为每个有详细信息块的设备独立解析，并保留第一个作为回退模板
+  const deviceDetailsMap = new Map<string, Partial<ParsedDevice>>();
+  let fallbackDetails: Partial<ParsedDevice> = {};
   const deviceKeysWithDetails = new Set<string>();
   
   let match;
   
   REGEX.deviceDetails.lastIndex = 0;
   while ((match = REGEX.deviceDetails.exec(normalizedText)) !== null) {
-    const deviceKey = match[2];
+    const deviceKey = match[2].toLowerCase();
     const startIndex = match.index + match[0].length;
     
     const nextBlockStart = normalizedText.indexOf('[', startIndex);
@@ -151,41 +189,17 @@ export function parseRegistry(registryText: string): ParsedDevice[] {
       : normalizedText.substring(startIndex, nextBlockStart);
 
     // 标记为有详细信息的设备
-    deviceKeysWithDetails.add(deviceKey.toLowerCase());
+    deviceKeysWithDetails.add(deviceKey);
 
-    // 只从第一个有详细信息的设备提取共享数据作为模板
-    if (Object.keys(sharedDetails).length === 0) {
-      try {
-        // 解析各个字段
-        const addressMatch = blockContent.match(REGEX.address);
-        if (addressMatch) sharedDetails.address = parseBluetoothAddress(addressMatch[1]);
-
-        const ltkMatch = blockContent.match(REGEX.ltk);
-        if (ltkMatch) sharedDetails.ltk = parseHexBytesRaw(ltkMatch[1]);
-
-        const irkMatch = blockContent.match(REGEX.irk);
-        if (irkMatch) sharedDetails.irk = parseHexBytesRaw(irkMatch[1]);
-
-        const csrkMatch = blockContent.match(REGEX.csrk);
-        if (csrkMatch) sharedDetails.csrk = parseHexBytesRaw(csrkMatch[1]);
-
-        const edivMatch = blockContent.match(REGEX.ediv);
-        if (edivMatch) sharedDetails.ediv = parseInt(edivMatch[1], 16);
-
-        const erandMatch = blockContent.match(REGEX.erand);
-        if (erandMatch) sharedDetails.erand = parseHexToBigIntDecimal(erandMatch[1], true).toString();
-
-        const addrTypeMatch = blockContent.match(REGEX.addressType);
-        if (addrTypeMatch) sharedDetails.addressType = parseInt(addrTypeMatch[1], 16);
-
-        const authReqMatch = blockContent.match(REGEX.authReq);
-        if (authReqMatch) sharedDetails.authReq = parseInt(authReqMatch[1], 16);
-
-        const keyLenMatch = blockContent.match(REGEX.keyLength);
-        if (keyLenMatch) sharedDetails.keyLength = parseInt(keyLenMatch[1], 16);
-      } catch (error) {
-        throw new Error(`解析设备详细信息时出错: ${(error as Error).message}`);
+    try {
+      const details = parseDeviceDetails(blockContent);
+      deviceDetailsMap.set(deviceKey, details);
+      // 第一个有详细信息的设备作为缺失字段的回退模板
+      if (Object.keys(fallbackDetails).length === 0) {
+        fallbackDetails = details;
       }
+    } catch (error) {
+      throw new Error(`解析设备 ${deviceKey} 详细信息时出错: ${(error as Error).message}`);
     }
   }
 
@@ -195,13 +209,16 @@ export function parseRegistry(registryText: string): ParsedDevice[] {
   for (const [, deviceMap] of allDeviceMappings) {
     for (const [deviceKey, linkKey] of deviceMap) {
       try {
+        // 自身详细信息优先，缺失字段用第一个设备的模板补全
+        const ownDetails = deviceDetailsMap.get(deviceKey) ?? {};
         const device: ParsedDevice = {
           address: formatMacAddress(deviceKey),
           name: '',
           deviceKey: deviceKey,
           linkKey: linkKey,
           hasDetails: deviceKeysWithDetails.has(deviceKey),
-          ...sharedDetails
+          ...fallbackDetails,
+          ...ownDetails
         };
         
         devices.push(device);

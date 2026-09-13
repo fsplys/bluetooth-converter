@@ -66,6 +66,32 @@ export function inferDeviceType(device: ParsedDevice): DeviceType {
 }
 
 /**
+ * 根据设备类型获取 Bluetooth Class of Device (CoD)
+ * 
+ * CoD 为 24 位数值：MajorServiceClass(11bit) | MajorDeviceClass(5bit) | MinorDeviceClass(6bit)
+ * - Mouse:       Peripheral(0x05) + Pointing(0x20)   = 0x000580
+ * - Keyboard:    Peripheral(0x05) + Keyboard(0x10)   = 0x000540
+ * - Audio/Voice: AudioVideo(0x04) + Audio(0x06)      = 0x040418
+ * - Gamepad:     Peripheral(0x05) + Gamepad(0x08)    = 0x002508
+ * - Peripheral:  Peripheral(0x05) + Uncategorized    = 0x000500
+ */
+function getDeviceClass(deviceType: DeviceType): string {
+  switch (deviceType) {
+    case 'Mouse':
+      return '0x000580';
+    case 'Keyboard':
+      return '0x000540';
+    case 'Audio/Voice':
+      return '0x040418';
+    case 'Gamepad':
+      return '0x002508';
+    case 'Peripheral':
+    default:
+      return '0x000500';
+  }
+}
+
+/**
  * 生成 Ubuntu BlueZ info 文件内容
  * 
  * 转换规则：
@@ -92,11 +118,13 @@ export function generateBlueZInfo(device: ParsedDevice, deviceName?: string): st
 
   try {
     const name = deviceName || device.name || 'Unknown Device';
+    const deviceType = inferDeviceType({ ...device, name });
+    const deviceClass = getDeviceClass(deviceType);
 
     const lines: string[] = [
       '[General]',
       `Name=${name}`,
-      'Class=0x000580',
+      `Class=${deviceClass}`,
       'SupportedTechnologies=BR/EDR;LE;',
       'Trusted=true',
       'Blocked=false',
