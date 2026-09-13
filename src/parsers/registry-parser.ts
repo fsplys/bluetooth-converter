@@ -119,8 +119,8 @@ function parseDeviceDetails(blockContent: string): Partial<ParsedDevice> {
  * 
  * 处理流程：
  * 1. 从适配器级别提取所有设备 MAC -> LinkKey 映射
- * 2. 从设备详细信息块提取共享数据（LTK、IRK、EDIV 等）
- * 3. 为所有设备创建完整的设备对象（共享详细信息，使用各自的 LinkKey）
+ * 2. 为每个有详细信息块的设备独立解析 LTK、IRK、EDIV 等，首个设备作为缺失字段回退模板
+ * 3. 为所有设备创建对象：自身详细信息优先，缺失字段用回退模板补全，LinkKey 使用各自值
  * 
  * @param registryText 注册表文本内容
  * @returns 解析后的设备数组
@@ -212,13 +212,14 @@ export function parseRegistry(registryText: string): ParsedDevice[] {
         // 自身详细信息优先，缺失字段用第一个设备的模板补全
         const ownDetails = deviceDetailsMap.get(deviceKey) ?? {};
         const device: ParsedDevice = {
-          address: formatMacAddress(deviceKey),
           name: '',
           deviceKey: deviceKey,
           linkKey: linkKey,
           hasDetails: deviceKeysWithDetails.has(deviceKey),
           ...fallbackDetails,
-          ...ownDetails
+          ...ownDetails,
+          // address 必须由 deviceKey 确定，放在最后避免被回退模板中其他设备的地址覆盖
+          address: formatMacAddress(deviceKey),
         };
         
         devices.push(device);
